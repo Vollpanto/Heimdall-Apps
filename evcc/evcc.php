@@ -32,28 +32,40 @@ class evcc extends \App\SupportedApps implements \App\EnhancedApps // phpcs:igno
         $res = parent::execute($this->url('api/state'), $this->getAttrs());
         if ($res !== null) {
             $json = json_decode($res->getBody());
-            // The state payload is wrapped in a "result" object. Fields vary by
-            // configuration, so read each one defensively.
-            if ($json !== null && isset($json->result)) {
-                $result = $json->result;
-                $status = 'active';
 
-                // pvPower is only present when a PV meter is configured (grid-only
-                // setups omit it); default to 0 so the tile still renders.
-                $pvWatts = isset($result->pvPower) ? (float) $result->pvPower : 0.0;
-                $data['pv'] = $this->formatKw($pvWatts);
+            if ($json !== null) {
+                // FIX (2026-11-07): evcc >= 0.2xx returns the state object at the
+                // TOP LEVEL (no {"result": ...} wrapper anymore). Older evcc
+                // versions wrapped it. Accept both so current and legacy evcc
+                // instances both work.
+                if (isset($json->result)) {
+                    $result = $json->result;
+                } elseif (isset($json->loadpoints) || isset($json->pvPower) || isset($json->grid)) {
+                    $result = $json;
+                } else {
+                    $result = null;
+                }
 
-                // Sum chargePower across all loadpoints - loadpoints is evcc's core
-                // config and effectively always present.
-                $chargeWatts = 0.0;
-                if (isset($result->loadpoints) && is_array($result->loadpoints)) {
-                    foreach ($result->loadpoints as $lp) {
-                        if (isset($lp->chargePower)) {
-                            $chargeWatts += (float) $lp->chargePower;
+                if ($result !== null) {
+                    $status = 'active';
+
+                    // pvPower is only present when a PV meter is configured (grid-only
+                    // setups omit it); default to 0 so the tile still renders.
+                    $pvWatts = isset($result->pvPower) ? (float) $result->pvPower : 0.0;
+                    $data['pv'] = $this->formatKw($pvWatts);
+
+                    // Sum chargePower across all loadpoints - loadpoints is evcc's core
+                    // config and effectively always present.
+                    $chargeWatts = 0.0;
+                    if (isset($result->loadpoints) && is_array($result->loadpoints)) {
+                        foreach ($result->loadpoints as $lp) {
+                            if (isset($lp->chargePower)) {
+                                $chargeWatts += (float) $lp->chargePower;
+                            }
                         }
                     }
+                    $data['charging'] = $this->formatKw($chargeWatts);
                 }
-                $data['charging'] = $this->formatKw($chargeWatts);
             }
         }
 
